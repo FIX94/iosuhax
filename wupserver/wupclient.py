@@ -255,10 +255,25 @@ class wupclient:
         (ret, data) = self.ioctlv(handle, 0x10, [inbuffer], [0x293], [(ptr, size*cnt)], [])
         return (ret)
 
+    def FSA_GetStatFile(self, handle, file_handle):
+        inbuffer = buffer(0x520)
+        copy_word(inbuffer, file_handle, 0x4)
+        (ret, data) = self.ioctl(handle, 0x14, inbuffer, 0x64)
+        return (ret, struct.unpack(">IIIIIIIIIIIIIIIIIIIIIIIII", data))
+
     def FSA_CloseFile(self, handle, file_handle):
         inbuffer = buffer(0x520)
         copy_word(inbuffer, file_handle, 0x4)
         (ret, data) = self.ioctl(handle, 0x15, inbuffer, 0x293)
+        return ret
+
+    def FSA_ChangeMode(self, handle, path, mode):
+        mask = 0x777
+        inbuffer = buffer(0x520)
+        copy_string(inbuffer, path, 0x0004)
+        copy_word(inbuffer, mode, 0x0284)
+        copy_word(inbuffer, mask, 0x0288)
+        (ret, _) = self.ioctl(handle, 0x20, inbuffer, 0x293)
         return ret
 
     # mcp
@@ -274,6 +289,10 @@ class wupclient:
         (ret, _) = self.ioctlv(handle, 0x81, [inbuffer], [])
         return ret
 
+    def MCP_InstallGetProgress(self, handle):
+        (ret, data) = self.ioctl(handle, 0x82, [], 0x24)
+        return (ret, struct.unpack(">IIIIIIIII", data))
+
     def MCP_CopyTitle(self, handle, path, dst_device_id, flush):
         inbuffer = buffer(0x27F)
         copy_string(inbuffer, path, 0x0)
@@ -284,9 +303,17 @@ class wupclient:
         (ret, _) = self.ioctlv(handle, 0x85, [inbuffer, inbuffer2, inbuffer3], [])
         return ret
 
-    def MCP_InstallGetProgress(self, handle):
-        (ret, data) = self.ioctl(handle, 0x82, [], 0x24)
-        return (ret, struct.unpack(">IIIIIIIII", data))
+    def MCP_InstallSetTargetDevice(self, handle, device):
+        inbuffer = buffer(0x4)
+        copy_word(inbuffer, device, 0x0)
+        (ret, _) = self.ioctl(handle, 0x8D, inbuffer, 0)
+        return ret
+
+    def MCP_InstallSetTargetUsb(self, handle, device):
+        inbuffer = buffer(0x4)
+        copy_word(inbuffer, device, 0x0)
+        (ret, _) = self.ioctl(handle, 0xF1, inbuffer, 0)
+        return ret
 
     # syslog (tmp)
     def dump_syslog(self):
@@ -315,6 +342,13 @@ class wupclient:
             print("mkdir error (%s, %08X)" % (path, ret))
             return ret
 
+    def chmod(self, filename, flags):
+        fsa_handle = self.get_fsa_handle()
+        if filename[0] != "/":
+            filename = self.cwd + "/" + filename
+        ret = w.FSA_ChangeMode(fsa_handle, filename, flags)
+        print("chmod returned : " + hex(ret))
+        
     def cd(self, path):
         if path[0] != "/" and self.cwd[0] == "/":
             return self.cd(self.cwd + "/" + path)
@@ -445,7 +479,7 @@ class wupclient:
         if directorypath == None:
             open(local_filename, "wb").write(buffer)
         else:
-            dir_path = os.path.dirname(os.path.realpath(".")).replace('\\','/')
+            dir_path = os.path.dirname(os.path.abspath(sys.argv[0])).replace('\\','/')
             fullpath = dir_path + "/" + directorypath + "/"
             fullpath = fullpath.replace("//","/")
             mkdir_p(fullpath)
@@ -496,6 +530,25 @@ class wupclient:
             sys.stdout.write(hex(k) + "\r"); sys.stdout.flush();
             ret = self.FSA_WriteFile(fsa_handle, file_handle, buffer[k:(k+cur_size)])
             k += cur_size
+        ret = self.FSA_CloseFile(fsa_handle, file_handle)
+
+    def stat(self, filename):
+        fsa_handle = self.get_fsa_handle()
+        if filename[0] != "/":
+            filename = self.cwd + "/" + filename
+        ret, file_handle = self.FSA_OpenFile(fsa_handle, filename, "r")
+        if ret != 0x0:
+            print("stat error : could not open " + filename)
+            return
+        (ret, stats) = self.FSA_GetStatFile(fsa_handle, file_handle)
+        if ret != 0x0:
+            print("stat error : " + hex(ret))
+        else:
+            print("flags: " + hex(stats[1]))
+            print("mode: " + hex(stats[2]))
+            print("owner: " + hex(stats[3]))
+            print("group: " + hex(stats[4]))
+            print("size: " + hex(stats[5]))
         ret = self.FSA_CloseFile(fsa_handle, file_handle)
 
     def up(self, local_filename, filename = None):
@@ -612,12 +665,30 @@ def unmount_odd_tickets():
     ret = w.close(handle)
     print(hex(ret))
 
-def install_title(path):
+def install_title(path, installToUsb = 0):
     mcp_handle = w.open("/dev/mcp", 0)
     print(hex(mcp_handle))
 
     ret, data = w.MCP_InstallGetInfo(mcp_handle, "/vol/storage_sdcard/"+path)
     print("install info : " + hex(ret), [hex(v) for v in data])
+    if ret != 0:
+        ret = w.close(mcp_handle)
+        print(hex(ret))
+        return
+
+    ret = w.MCP_InstallSetTargetDevice(mcp_handle, installToUsb)
+    print("install set target device : " + hex(ret))
+    if ret != 0:
+        ret = w.close(mcp_handle)
+        print(hex(ret))
+        return
+
+    ret = w.MCP_InstallSetTargetUsb(mcp_handle, installToUsb)
+    print("install set target usb : " + hex(ret))
+    if ret != 0:
+        ret = w.close(mcp_handle)
+        print(hex(ret))
+        return
 
     ret = w.MCP_Install(mcp_handle, "/vol/storage_sdcard/"+path)
     print("install : " + hex(ret))
