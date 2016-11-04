@@ -601,8 +601,19 @@ class wupclient:
             return
         self.FSA_CloseDir(fsa_handle, dir_handle)
         if len(self.ls(path, True)) != 0:
-            print("rmdir error : directory not empty!")
-            return
+            print("WARNING: THIS DIRECTORY IS NOT EMPY, DELETE AT YOUR OWN RISK! ARE YOU SURE (Y/N)?")
+            if self.askyesno() == True:
+                entries = self.ls(path, True)
+                for e in entries:
+                    if e["is_file"]:
+                        print("deleting: " + e["name"])
+                        self.rm(path + "/" + e["name"])
+                    else:
+                        print("deleting: " + e["name"] + "/")
+                        self.rmdir(path + "/" + e["name"])
+            else:
+                print("rmdir aborted")
+                return
         print("WARNING: REMOVING A DIRECTORY CAN BRICK YOUR CONSOLE, ARE YOU SURE (Y/N)?")
         if self.askyesno() == True:
             ret = self.FSA_Remove(fsa_handle, path)
