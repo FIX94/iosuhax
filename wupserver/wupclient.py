@@ -691,6 +691,16 @@ def unmount_odd_tickets():
     ret = w.close(handle)
     print(hex(ret))
 
+def copy_title(path, installToUsb = 0, flush = 0):
+    mcp_handle = w.open("/dev/mcp", 0)
+    print(hex(mcp_handle))
+
+    ret = w.MCP_CopyTitle(mcp_handle, path, installToUsb, flush)
+    print(hex(ret))
+
+    ret = w.close(mcp_handle)
+    print(hex(ret))
+
 def install_title(path, installToUsb = 0):
     mcp_handle = w.open("/dev/mcp", 0)
     print(hex(mcp_handle))
@@ -739,6 +749,13 @@ def read_and_print(adr, size):
     data = struct.unpack(">%dI" % (len(data) // 4), data)
     for i in range(0, len(data), 4):
         print(" ".join("%08X"%v for v in data[i:i+4]))
+
+def read_and_dump(adr,size):
+    f=open("dump.bin","wb")
+    for i in range(0,size,1024):
+        data = w.read(adr+i,1024)
+        f.write(data)
+    f.close()
 
 if __name__ == '__main__':
     w = wupclient()
