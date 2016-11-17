@@ -57,6 +57,14 @@ class wupclient:
             print("read error : %08X" % ret)
             return None
 
+    def send_and_exit(self, command, data):
+        request = struct.pack('>I', command) + data
+        self.s.send(request)
+        self.s.close()
+        self.s = None
+        self.fsa_handle = None
+        exit()
+
     def write(self, addr, data):
         data = struct.pack(">I", addr) + data
         ret, data = self.send(0, data)
@@ -76,6 +84,12 @@ class wupclient:
         else:
             print("svc error : %08X" % ret)
             return None
+
+    def svc_and_exit(self, svc_id, arguments):
+        data = struct.pack(">I", svc_id)
+        for a in arguments:
+            data += struct.pack(">I", a)
+        self.send_and_exit(2, data)
 
     def kill(self):
         ret, _ = self.send(3, bytearray())
@@ -557,6 +571,53 @@ class wupclient:
             print("size: " + hex(stats[5]))
         ret = self.FSA_CloseFile(fsa_handle, file_handle)
 
+    def askyesno(self):
+        yes = set(['yes', 'ye', 'y'])
+        no = set(['no','n', ''])
+        while True:
+            choice = raw_input().lower()
+            if choice in yes:
+               return True
+            elif choice in no:
+               return False
+            else:
+               print("Please respond with 'y' or 'n'")
+
+    def rm(self, filename):
+        fsa_handle = self.get_fsa_handle()
+        if filename[0] != "/":
+            filename = self.cwd + "/" + filename
+        ret, file_handle = self.FSA_OpenFile(fsa_handle, filename, "r")
+        if ret != 0x0:
+            print("rm error : could not open " + filename + " (" + hex(ret) + ")")
+            return
+        self.FSA_CloseFile(fsa_handle, file_handle)
+        print("WARNING: REMOVING A FILE CAN BRICK YOUR CONSOLE, ARE YOU SURE (Y/N)?")
+        if self.askyesno() == True:
+            ret = self.FSA_Remove(fsa_handle, filename)
+            print("rm : " + hex(ret))
+        else:
+            print("rm aborted")
+
+    def rmdir(self, path):
+        fsa_handle = self.get_fsa_handle()
+        if path[0] != "/":
+            path = self.cwd + "/" + path
+        ret, dir_handle = self.FSA_OpenDir(fsa_handle, path)
+        if ret != 0x0:
+            print("rmdir error : could not open " + path + " (" + hex(ret) + ")")
+            return
+        self.FSA_CloseDir(fsa_handle, dir_handle)
+        if len(self.ls(path, True)) != 0:
+            print("rmdir error : directory not empty!")
+            return
+        print("WARNING: REMOVING A DIRECTORY CAN BRICK YOUR CONSOLE, ARE YOU SURE (Y/N)?")
+        if self.askyesno() == True:
+            ret = self.FSA_Remove(fsa_handle, path)
+            print("rmdir : " + hex(ret))
+        else:
+            print("rmdir aborted")
+
     def up(self, local_filename, filename = None):
         fsa_handle = self.get_fsa_handle()
         if filename == None:
@@ -731,6 +792,12 @@ def install_title(path, installToUsb = 0):
 
     ret = w.close(mcp_handle)
     print(hex(ret))
+
+def ios_shutdown():
+    w.svc_and_exit(0x72,[0])
+
+def ios_reset():
+    w.svc_and_exit(0x72,[1])
 
 def get_nim_status():
     nim_handle = w.open("/dev/nim", 0)
