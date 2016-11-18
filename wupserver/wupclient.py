@@ -4,6 +4,7 @@ import socket
 import os
 import sys
 import struct
+import codecs
 from time import sleep
 
 def buffer(size):
@@ -473,37 +474,45 @@ class wupclient:
         self.free(buffer)
         ret = self.FSA_CloseFile(fsa_handle, out_file_handle)
 
-    def dl(self, filename, directorypath = None, local_filename = None):
+    def dl_buf(self, filename, show_progress = True):
         fsa_handle = self.get_fsa_handle()
         if filename[0] != "/":
             filename = self.cwd + "/" + filename
+        ret, file_handle = self.FSA_OpenFile(fsa_handle, filename, "r")
+        if ret != 0x0:
+            print("dl error : could not open " + filename)
+            return None
+        buf = bytearray()
+        block_size = 0x400
+        while True:
+            ret, data = self.FSA_ReadFile(fsa_handle, file_handle, 0x1, block_size)
+            buf += data[:ret]
+            if show_progress:
+                sys.stdout.write(hex(len(buf)) + "\r")
+                sys.stdout.flush()
+            if ret < block_size:
+                break
+        self.FSA_CloseFile(fsa_handle, file_handle)
+        return buf
+
+    def dl(self, filename, directorypath = None, local_filename = None):
+        buf = self.dl_buf(filename)
+        if buf == None:
+            return -1
         if local_filename == None:
             if "/" in filename:
                 local_filename = filename[[i for i, x in enumerate(filename) if x == "/"][-1]+1:]
             else:
                 local_filename = filename
-        ret, file_handle = self.FSA_OpenFile(fsa_handle, filename, "r")
-        if ret != 0x0:
-            print("dl error : could not open " + filename)
-            return
-        buffer = bytearray()
-        block_size = 0x400
-        while True:
-            ret, data = self.FSA_ReadFile(fsa_handle, file_handle, 0x1, block_size)
-            # print(hex(ret), data)
-            buffer += data[:ret]
-            sys.stdout.write(hex(len(buffer)) + "\r"); sys.stdout.flush();
-            if ret < block_size:
-                break
-        ret = self.FSA_CloseFile(fsa_handle, file_handle)
         if directorypath == None:
-            open(local_filename, "wb").write(buffer)
+            open(local_filename, "wb").write(buf)
         else:
             dir_path = os.path.dirname(os.path.abspath(sys.argv[0])).replace('\\','/')
             fullpath = dir_path + "/" + directorypath + "/"
             fullpath = fullpath.replace("//","/")
             mkdir_p(fullpath)
-            open(fullpath + local_filename, "wb").write(buffer) 
+            open(fullpath + local_filename, "wb").write(buf) 
+        return 0
 
     def mkdir_p(path):
         try:
@@ -751,6 +760,51 @@ def unmount_odd_tickets():
 
     ret = w.close(handle)
     print(hex(ret))
+
+def get_tik_keys():
+    base_path = "/vol/system/rights/ticket/apps"
+    entries = w.ls(base_path, True)
+    #parse subfolder contents to get tik location
+    tikFiles = []
+    for e in entries:
+        if not e["is_file"]:
+            path = base_path + "/" + e["name"]
+            subentries = w.ls(path, True)
+            for se in subentries:
+                if se["is_file"] and se["name"].endswith(".tik"):
+                    tikFiles.append(path + "/" + se["name"])
+    #go through all tiks
+    tikList = []
+    for tikF in tikFiles:
+        tikContent = w.dl_buf(tikF, False)
+        if tikContent == None:
+            continue
+        checkTik = True
+        tikP = 0
+        while checkTik == True:
+            checkTik = False
+            curTik = tikContent[tikP:]
+            if(curTik[0:4] != b'\x00\x01\x00\x04'):
+                print("Unhandled tik start at %i with ticket %s!" % (tikP, tikF))
+                break
+            titleId = codecs.encode(curTik[0x1DC:0x1E4], 'hex').decode()
+            titleKey = codecs.encode(curTik[0x1BF:0x1CF], 'hex').decode()
+            tikFprint = tikF[tikF.rfind("apps/")+5:]
+            tikList.append(titleId + " " + titleKey + " (" + tikFprint + " @ " + hex(tikP) + ")")
+            if(len(curTik) > 0x354):
+                if(curTik[0x2B0:0x2B2] == b'\x00\x00' and curTik[0x2B8:0x2BC] == b'\x00\x01\x00\x04'):
+                    tikP += 0x2B8
+                    checkTik = True
+                elif(curTik[0x2B0:0x2B2] == b'\x00\x01' and curTik[0x350:0x354] == b'\x00\x01\x00\x04'):
+                    tikP += 0x350
+                    checkTik = True
+                else:
+                    print("Unhandled packed tik at %i with ticket %s!" % (tikP, tikF))
+    #print out all sorted and unique tiks
+    uniqueTiks = sorted(set(tikList))
+    print("Found %i unique tickets" % len(uniqueTiks))
+    for tikCnt in uniqueTiks:
+        print(tikCnt)
 
 def copy_title(path, installToUsb = 0, flush = 0):
     mcp_handle = w.open("/dev/mcp", 0)
