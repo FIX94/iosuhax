@@ -308,6 +308,14 @@ class wupclient:
         (ret, data) = self.ioctl(handle, 0x82, [], 0x24)
         return (ret, struct.unpack(">IIIIIIIII", data))
 
+    def MCP_DeleteTitle(self, handle, path, flush):
+        inbuffer = buffer(0x38)
+        copy_string(inbuffer, path, 0x0)
+        inbuffer2 = buffer(0x4)
+        copy_word(inbuffer2, flush, 0x0)
+        (ret, _) = self.ioctlv(handle, 0x83, [inbuffer, inbuffer2], [])
+        return ret
+
     def MCP_CopyTitle(self, handle, path, dst_device_id, flush):
         inbuffer = buffer(0x27F)
         copy_string(inbuffer, path, 0x0)
@@ -806,6 +814,8 @@ def get_tik_keys():
     for tikCnt in uniqueTiks:
         print(tikCnt)
 
+#path=root folder of installed/extracted title, only works if title is deleted
+#on the destination device beforehand; path can also be a sd card location!
 def copy_title(path, installToUsb = 0, flush = 0):
     mcp_handle = w.open("/dev/mcp", 0)
     print(hex(mcp_handle))
@@ -816,6 +826,7 @@ def copy_title(path, installToUsb = 0, flush = 0):
     ret = w.close(mcp_handle)
     print(hex(ret))
 
+#path=path to sd card folder on device root
 def install_title(path, installToUsb = 0):
     mcp_handle = w.open("/dev/mcp", 0)
     print(hex(mcp_handle))
@@ -844,6 +855,17 @@ def install_title(path, installToUsb = 0):
     ret = w.MCP_Install(mcp_handle, "/vol/storage_sdcard/"+path)
     print("install : " + hex(ret))
 
+    ret = w.close(mcp_handle)
+    print(hex(ret))
+
+#path=full path, for example "/vol/storage_mlc01/usr/title/00050000/10179C00"
+def delete_title(path, flush = 0):
+    mcp_handle = w.open("/dev/mcp", 0)
+    print(hex(mcp_handle))
+ 
+    ret = w.MCP_DeleteTitle(mcp_handle, path, flush)
+    print("delete title : " + hex(ret))
+ 
     ret = w.close(mcp_handle)
     print(hex(ret))
 
