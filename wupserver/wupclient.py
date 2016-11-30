@@ -291,6 +291,12 @@ class wupclient:
         (ret, _) = self.ioctl(handle, 0x20, inbuffer, 0x293)
         return ret
 
+    def FSA_Remove(self, handle, path):
+        inbuffer = buffer(0x520)
+        copy_string(inbuffer, path, 0x04)
+        (ret, _) = self.ioctl(handle, 0x08, inbuffer, 0x293)
+        return ret
+
     # mcp
     def MCP_InstallGetInfo(self, handle, path):
         inbuffer = buffer(0x27F)
